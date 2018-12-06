@@ -33,10 +33,13 @@ enum State {
   case populated([Recording])
   case empty
   case error(Error)
+  case paging([Recording], next: Int)
   
   var currentRecordings: [Recording] {
     switch self {
     case .populated(let recordings):
+      return recordings
+    case .paging(let recordings, _):
       return recordings
     default:
       return []
@@ -90,16 +93,14 @@ class MainViewController: UIViewController {
       tableView.tableFooterView = emptyView
     case .populated:
       tableView.tableFooterView = nil
+    case .paging:
+      tableView.tableFooterView = loadingView
     }
   }
   
-  // MARK: - Loading recordings
-  
-  @objc func loadRecordings() {
-    state = .loading
-    
+  func loadPage(_ page: Int){
     let query = searchController.searchBar.text
-    networkingService.fetchRecordings(matching: query, page: 1) { [weak self] response in
+    networkingService.fetchRecordings(matching: query, page: page) { [weak self] response in
       
       guard let `self` = self else {
         return
@@ -108,6 +109,13 @@ class MainViewController: UIViewController {
       self.searchController.searchBar.endEditing(true)
       self.update(response: response)
     }
+  }
+  
+  // MARK: - Loading recordings
+  
+  @objc func loadRecordings() {
+    state = .loading
+    loadPage(1)
   }
 
   func update(response: RecordingsResult) {
@@ -121,7 +129,14 @@ class MainViewController: UIViewController {
       return
     }
     
-    state = .populated(newRecordings)
+    var allRecordings = state.currentRecordings
+    allRecordings.append(contentsOf: newRecordings)
+    
+    if response.hasMorePages {
+      state = .paging(allRecordings, next: response.nextPage)
+    } else {
+      state = .populated(allRecordings)
+    }
   }
   
   // MARK: - View Configuration
@@ -194,6 +209,11 @@ extension MainViewController: UITableViewDataSource {
     }
     
     cell.load(recording: state.currentRecordings[indexPath.row])
+    
+    if case .paging(_, let nextPage) = state,
+      indexPath.row == state.currentRecordings.count - 1 {
+      loadPage(nextPage)
+    }
     
     return cell
   }
