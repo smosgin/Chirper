@@ -28,6 +28,22 @@
 
 import UIKit
 
+enum State {
+  case loading
+  case populated([Recording])
+  case empty
+  case error(Error)
+  
+  var currentRecordings: [Recording] {
+    switch self {
+    case .populated(let recordings):
+      return recordings
+    default:
+      return []
+    }
+  }
+}
+
 class MainViewController: UIViewController {
   
   @IBOutlet weak var tableView: UITableView!
@@ -40,9 +56,8 @@ class MainViewController: UIViewController {
   let searchController = UISearchController(searchResultsController: nil)
   let networkingService = NetworkingService()
   let darkGreen = UIColor(red: 11/255, green: 86/255, blue: 14/255, alpha: 1)
-  var recordings: [Recording]?
-  var error: Error?
-  var isLoading = false
+  
+  var state = State.loading
   
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -59,12 +74,25 @@ class MainViewController: UIViewController {
     searchController.searchBar.becomeFirstResponder()
   }
   
+  func setFooterView() {
+    switch state {
+    case .loading:
+      tableView.tableFooterView = loadingView
+    case .error(let error):
+      errorLabel.text = error.localizedDescription
+      tableView.tableFooterView = errorView
+    case .empty:
+      tableView.tableFooterView = emptyView
+    case .populated:
+      tableView.tableFooterView = nil
+    }
+  }
+  
   // MARK: - Loading recordings
   
   @objc func loadRecordings() {
-    isLoading = true
-    tableView.tableFooterView = loadingView
-    recordings = []
+    state = .loading
+    setFooterView()
     tableView.reloadData()
     
     let query = searchController.searchBar.text
@@ -75,25 +103,27 @@ class MainViewController: UIViewController {
       }
       
       self.searchController.searchBar.endEditing(true)
-      self.isLoading = false
       self.update(response: response)
     }
   }
 
   func update(response: RecordingsResult) {
-    if let recordings = response.recordings, !recordings.isEmpty {
-      tableView.tableFooterView = nil
-    } else if let error = response.error {
-      errorLabel.text = error.localizedDescription
-      tableView.tableFooterView = errorView
+    if let error = response.error {
+      state = .error(error)
+      setFooterView()
       tableView.reloadData()
       return
-    } else {
-      tableView.tableFooterView = emptyView
     }
     
-    recordings = response.recordings
-    error = response.error
+    guard let newRecordings = response.recordings, !newRecordings.isEmpty else {
+      state = .empty
+      setFooterView()
+      tableView.reloadData()
+      return
+    }
+    
+    state = .populated(newRecordings)
+    setFooterView()
     tableView.reloadData()
   }
   
@@ -154,7 +184,7 @@ extension MainViewController: UITableViewDataSource {
   
   func tableView(_ tableView: UITableView,
                  numberOfRowsInSection section: Int) -> Int {
-    return recordings?.count ?? 0
+    return state.currentRecordings.count
   }
   
   func tableView(_ tableView: UITableView,
@@ -166,9 +196,7 @@ extension MainViewController: UITableViewDataSource {
         return UITableViewCell()
     }
     
-    if let recordings = recordings {
-      cell.load(recording: recordings[indexPath.row])
-    }
+    cell.load(recording: state.currentRecordings[indexPath.row])
     
     return cell
   }
